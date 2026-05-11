@@ -1,0 +1,8 @@
+student_enrollments_active:1
+batch_subjects:4
+student_fee_balances:1
+attendance_rows:10
+exams_total:4
+marks_entries:0
+results_publish:2
+exam_categories:5

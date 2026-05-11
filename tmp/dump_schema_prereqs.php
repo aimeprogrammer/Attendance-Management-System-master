@@ -1,0 +1,20 @@
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/../connect.php';
+
+$tables = ['students','programs','batches','subjects','student_enrollments','student_fee_balances'];
+
+$lines = [];
+foreach ($tables as $t) {
+  $lines[] = "=== TABLE: {$t} ===";
+  $res = mysqli_query($link, "SHOW TABLES LIKE '".mysqli_real_escape_string($link,$t)."'");
+  if (!$res || mysqli_num_rows($res) === 0) { $lines[] = "Status: MISSING"; continue; }
+  $cols = mysqli_query($link, "SHOW COLUMNS FROM {$t}");
+  while ($row = mysqli_fetch_assoc($cols)) {
+    $lines[] = "- {$row['Field']} ({$row['Type']}) null=" . ($row['Null'] ?? '');
+  }
+}
+$outPath = __DIR__ . '/_schema_dump_prereqs.txt';
+file_put_contents($outPath, implode(PHP_EOL,$lines));
+echo "WROTE: {$outPath}\n";
+?>
