@@ -156,6 +156,63 @@ $res = mysqli_query($link, $annSql);
 if ($res) {
   while ($row = mysqli_fetch_assoc($res)) $dashboard['latest_announcements'][] = $row;
 }
+
+// 7) Chart Data: Monthly Attendance Trend
+$chartMonths = [];
+$chartAttData = [];
+$attTrendSql = "SELECT DATE_FORMAT(stat_date, '%M') as month, 
+                  ROUND(SUM(CASE WHEN st_status IN ('present','Present','late','half-day','Half-day') THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) as rate
+           FROM attendance 
+           WHERE stat_id = ? 
+           GROUP BY MONTH(stat_date) 
+           ORDER BY stat_date ASC LIMIT 6";
+$stmt = mysqli_prepare($link, $attTrendSql);
+if ($stmt) {
+    mysqli_stmt_bind_param($stmt, "s", $stId);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    while($row = mysqli_fetch_assoc($res)) {
+        $chartMonths[] = $row['month'];
+        $chartAttData[] = (float)$row['rate'];
+    }
+    mysqli_stmt_close($stmt);
+}
+
+// 8) Chart Data: Subject Performance
+$perfSubjects = [];
+$perfMarks = [];
+$perfSql = "SELECT s.subject_code, MAX(me.total_obtained) as top_mark
+            FROM marks_entries me
+            JOIN subjects s ON me.subject_id = s.subject_id
+            WHERE me.st_id = ?
+            GROUP BY s.subject_id LIMIT 5";
+$stmt2 = mysqli_prepare($link, $perfSql);
+if ($stmt2) {
+    mysqli_stmt_bind_param($stmt2, "s", $stId);
+    mysqli_stmt_execute($stmt2);
+    $res2 = mysqli_stmt_get_result($stmt2);
+    while($row = mysqli_fetch_assoc($res2)) {
+        $perfSubjects[] = $row['subject_code'];
+        $perfMarks[] = (float)$row['top_mark'];
+    }
+    mysqli_stmt_close($stmt2);
+}
+
+// 9) Recent Activity Feed
+$activityFeed = [];
+$actSql = "SELECT 'Result Published' as type, e.exam_name as title, me.updated_at as date 
+           FROM marks_entries me JOIN exams e ON me.exam_id = e.exam_id WHERE me.st_id = ? 
+           UNION ALL 
+           SELECT 'New Material' as type, title, uploaded_at as date FROM course_materials WHERE is_active=1 
+           ORDER BY date DESC LIMIT 5";
+$stmt3 = mysqli_prepare($link, $actSql);
+if ($stmt3) {
+    mysqli_stmt_bind_param($stmt3, "s", $stId);
+    mysqli_stmt_execute($stmt3);
+    $resAct = mysqli_stmt_get_result($stmt3);
+    while($row = mysqli_fetch_assoc($resAct)) $activityFeed[] = $row;
+    mysqli_stmt_close($stmt3);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -165,6 +222,7 @@ if ($res) {
   <title>Student Dashboard - Attendance Management</title>
   <link rel="stylesheet" type="text/css" href="../css/main.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <div class="dashboard-container">
@@ -213,6 +271,14 @@ if ($res) {
     </div>
 
     <div class="page-content">
+            <!-- Notification Alert for Low Attendance -->
+            <?php if ($dashboard['attendance_percentage'] < 75 && $totalCount > 0): ?>
+                <div class="alert alert-danger" style="margin-bottom: 25px;">
+                    <i class="fas fa-exclamation-triangle"></i> 
+                    <strong>Attention:</strong> Your attendance is currently <?php echo $dashboard['attendance_percentage']; ?>%, which is below the 75% requirement.
+                </div>
+            <?php endif; ?>
+
       <div class="stats-grid">
         <div class="stat-card primary">
           <div class="stat-icon"><i class="fas fa-layer-group"></i></div>
@@ -244,6 +310,40 @@ if ($res) {
             <div class="stat-label">Recent Results (Count)</div>
             <div class="stat-value"><?php echo (int)count($dashboard['recent_results']); ?></div>
           </div>
+        </div>
+      </div>
+
+      <!-- Analytics Charts -->
+      <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; margin-top: 30px;">
+        <div class="card">
+          <div class="card-header"><i class="fas fa-chart-line"></i> Attendance Consistency (%)</div>
+          <div class="card-body">
+            <canvas id="attChart" style="max-height: 250px;"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><i class="fas fa-bullseye"></i> Academic Strengths</div>
+          <div class="card-body">
+            <canvas id="perfChart" style="max-height: 250px;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 30px;">
+        <div class="card-header"><i class="fas fa-stream"></i> Recent Activity</div>
+        <div class="card-body">
+            <?php if (empty($activityFeed)): ?>
+                <p class="text-muted">No recent updates.</p>
+            <?php else: ?>
+                <ul style="list-style: none; padding: 0;">
+                    <?php foreach($activityFeed as $act): ?>
+                    <li style="padding: 10px 0; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between;">
+                        <span><strong><?php echo $act['type']; ?>:</strong> <?php echo htmlspecialchars($act['title']); ?></span>
+                        <small class="text-muted"><?php echo date('M d, H:i', strtotime($act['date'])); ?></small>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
         </div>
       </div>
 
@@ -314,6 +414,25 @@ if ($res) {
         </div>
       </div>
 
+      <!-- New Section: Recent Notifications -->
+      <div class="card" style="margin-top: 30px;">
+        <div class="card-header"><i class="fas fa-bell"></i> Recent Notifications</div>
+        <div class="card-body">
+            <?php
+            $notifSql = "SELECT message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 3";
+            $stmtN = mysqli_prepare($link, $notifSql);
+            mysqli_stmt_bind_param($stmtN, "s", $stId);
+            mysqli_stmt_execute($stmtN);
+            $resN = mysqli_stmt_get_result($stmtN);
+            while($n = mysqli_fetch_assoc($resN)): ?>
+                <div style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <small class="text-muted"><?php echo $n['created_at']; ?></small>
+                    <p style="margin: 5px 0 0 0;"><?php echo htmlspecialchars($n['message']); ?></p>
+                </div>
+            <?php endwhile; ?>
+        </div>
+      </div>
+
       <div class="card" style="margin-top: 30px;">
         <div class="card-header"><i class="fas fa-bolt"></i> Quick Actions</div>
         <div class="card-body">
@@ -329,5 +448,43 @@ if ($res) {
     </div>
   </div>
 </div>
+
+<script>
+// Attendance Trend
+new Chart(document.getElementById('attChart'), {
+    type: 'line',
+    data: {
+        labels: <?php echo json_encode($chartMonths); ?>,
+        datasets: [{
+            label: 'Attendance Rate',
+            data: <?php echo json_encode($chartAttData); ?>,
+            borderColor: '#4b77be',
+            backgroundColor: 'rgba(75, 119, 190, 0.1)',
+            fill: true,
+            tension: 0.4
+        }]
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+});
+
+// Subject Performance
+new Chart(document.getElementById('perfChart'), {
+    type: 'radar',
+    data: {
+        labels: <?php echo json_encode($perfSubjects); ?>,
+        datasets: [{
+            label: 'Best Score',
+            data: <?php echo json_encode($perfMarks); ?>,
+            backgroundColor: 'rgba(39, 174, 96, 0.2)',
+            borderColor: '#27ae60',
+            pointBackgroundColor: '#27ae60'
+        }]
+    },
+    options: { 
+        responsive: true,
+        scales: { r: { angleLines: { display: false }, suggestMin: 0, suggestMax: 100 } }
+    }
+});
+</script>
 </body>
 </html>

@@ -1,11 +1,34 @@
 <?php
 ob_start();
 session_start();
-if($_SESSION['name']!='oasis') {
+if (empty($_SESSION['role']) || $_SESSION['role'] !== 'teacher') {
   header('location: ../index.php');
   exit;
 }
 include('connect.php');
+
+$tcId = $_SESSION['tc_id'] ?? '';
+// Fetch Teacher Department for scoping
+$tcDept = '';
+$stmt = mysqli_prepare($link, "SELECT tc_dept FROM teachers WHERE tc_id = ?");
+mysqli_stmt_bind_param($stmt, "s", $tcId);
+mysqli_stmt_execute($stmt);
+mysqli_stmt_bind_result($stmt, $tcDept);
+mysqli_stmt_fetch($stmt);
+mysqli_stmt_close($stmt);
+
+// Fetch subjects for the teacher's department
+$subjects_list = [];
+$qSub = "SELECT s.subject_id, s.subject_name, s.subject_code 
+         FROM subjects s 
+         JOIN programs p ON s.program_id = p.program_id 
+         WHERE p.program_name = ? OR p.program_id = ?";
+$stmtSub = mysqli_prepare($link, $qSub);
+mysqli_stmt_bind_param($stmtSub, "ss", $tcDept, $tcDept);
+mysqli_stmt_execute($stmtSub);
+$resSub = mysqli_stmt_get_result($stmtSub);
+while($row = mysqli_fetch_assoc($resSub)) $subjects_list[] = $row;
+mysqli_stmt_close($stmtSub);
 
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(openssl_random_pseudo_bytes(32));
@@ -49,6 +72,14 @@ if (isset($_POST['att_save'])) {
             
             if($success) {
                 $success_msg = "✓ Attendance for " . date('F j, Y', strtotime($att_date)) . " has been saved successfully!";
+                
+                // Log the action
+                $log_action = "Marked attendance for Course: $course on Date: $att_date";
+                $actor = $_SESSION['tc_id'] ?? $_SESSION['name'];
+                $log_stmt = mysqli_prepare($link, "INSERT INTO system_logs (user_id, action) VALUES (?, ?)");
+                mysqli_stmt_bind_param($log_stmt, "ss", $actor, $log_action);
+                mysqli_stmt_execute($log_stmt);
+                mysqli_stmt_close($log_stmt);
             } else {
                 $error_msg = "Error saving attendance. Please try again.";
             }
@@ -123,10 +154,11 @@ if (isset($_POST['att_save'])) {
                                 </label>
                                 <select name="course_filter" id="course_filter" class="form-control" required>
                                     <option value="">-- Select Course --</option>
-                                    <option value="algo" <?php echo ($_GET['course_filter'] ?? '') == 'algo' ? 'selected' : ''; ?>>Analysis of Algorithms</option>
-                                    <option value="dbms" <?php echo ($_GET['course_filter'] ?? '') == 'dbms' ? 'selected' : ''; ?>>Database Management</option>
-                                    <option value="os" <?php echo ($_GET['course_filter'] ?? '') == 'os' ? 'selected' : ''; ?>>Operating System</option>
-                                    <option value="webdev" <?php echo ($_GET['course_filter'] ?? '') == 'webdev' ? 'selected' : ''; ?>>Web Development</option>
+                                    <?php foreach($subjects_list as $sub): ?>
+                                        <option value="<?php echo htmlspecialchars($sub['subject_code']); ?>" <?php echo ($_GET['course_filter'] ?? '') == $sub['subject_code'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($sub['subject_name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -156,10 +188,25 @@ if (isset($_POST['att_save'])) {
                 $course_filter = htmlspecialchars($_GET['course_filter']);
                 $date_filter = htmlspecialchars($_GET['date_filter']);
                 
-                $query = "SELECT st_id, st_name, st_dept, st_batch FROM students ORDER BY st_id ASC";
-                $result = mysqli_query($link, $query);
+                $query = "SELECT st_id, st_name, st_dept, st_batch FROM students WHERE st_dept = ? ORDER BY st_id ASC";
+                $stmt = mysqli_prepare($link, $query);
+                mysqli_stmt_bind_param($stmt, "s", $tcDept);
+                mysqli_stmt_execute($stmt);
+                $result = mysqli_stmt_get_result($stmt);
                 $students = mysqli_fetch_all($result, MYSQLI_ASSOC);
+                mysqli_stmt_close($stmt);
                 
+                // Pre-load existing attendance status
+                $existing = [];
+                $loadStmt = mysqli_prepare($link, "SELECT stat_id, status_type FROM attendance WHERE course = ? AND stat_date = ?");
+                mysqli_stmt_bind_param($loadStmt, "ss", $course_filter, $date_filter);
+                mysqli_stmt_execute($loadStmt);
+                $resLoad = mysqli_stmt_get_result($loadStmt);
+                while($row = mysqli_fetch_assoc($resLoad)) {
+                    $existing[$row['stat_id']] = $row['status_type'];
+                }
+                mysqli_stmt_close($loadStmt);
+
                 if(count($students) > 0):
             ?>
 
@@ -209,6 +256,7 @@ if (isset($_POST['att_save'])) {
                             <?php foreach($students as $index => $student): 
                                 $st_id = htmlspecialchars($student['st_id']);
                                 $st_name = htmlspecialchars($student['st_name']);
+                                $currentStatus = $existing[$st_id] ?? 'present';
                             ?>
                             <div class="student-row">
                                 <div style="font-weight: 600; color: var(--primary);"><?php echo $st_id; ?></div>
@@ -217,10 +265,10 @@ if (isset($_POST['att_save'])) {
                                 
                                 <!-- Status Toggle -->
                                 <div class="status-toggle">
-                                    <input type="radio" name="status[<?php echo $index; ?>]" id="present_<?php echo $index; ?>" value="present" checked>
+                                    <input type="radio" name="status[<?php echo $index; ?>]" id="present_<?php echo $index; ?>" value="present" <?php echo $currentStatus == 'present' ? 'checked' : ''; ?>>
                                     <label for="present_<?php echo $index; ?>"><i class="fas fa-check"></i> Present</label>
                                     
-                                    <input type="radio" name="status[<?php echo $index; ?>]" id="absent_<?php echo $index; ?>" value="absent">
+                                    <input type="radio" name="status[<?php echo $index; ?>]" id="absent_<?php echo $index; ?>" value="absent" <?php echo $currentStatus == 'absent' ? 'checked' : ''; ?>>
                                     <label for="absent_<?php echo $index; ?>" style="background: var(--border);"><i class="fas fa-times"></i> Absent</label>
                                 </div>
 

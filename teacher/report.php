@@ -8,6 +8,30 @@ if($_SESSION['name']!='oasis') {
 }
 
 include('connect.php');
+
+$tcId = $_SESSION['tc_id'] ?? '';
+$tcDept = '';
+$stmt = mysqli_prepare($link, "SELECT tc_dept FROM teachers WHERE tc_id = ?");
+mysqli_stmt_bind_param($stmt, "s", $tcId);
+mysqli_stmt_execute($stmt);
+mysqli_stmt_bind_result($stmt, $tcDept);
+mysqli_stmt_fetch($stmt);
+mysqli_stmt_close($stmt);
+
+// Fetch subjects for the teacher's department
+$subjects_list = [];
+$qSub = "SELECT s.subject_id, s.subject_name, s.subject_code 
+         FROM subjects s 
+         JOIN programs p ON s.program_id = p.program_id 
+         WHERE p.program_name = ? OR p.program_id = ?";
+$stmtSub = mysqli_prepare($link, $qSub);
+mysqli_stmt_bind_param($stmtSub, "ss", $tcDept, $tcDept);
+mysqli_stmt_execute($stmtSub);
+$resSub = mysqli_stmt_get_result($stmtSub);
+while($row = mysqli_fetch_assoc($resSub)) $subjects_list[] = $row;
+mysqli_stmt_close($stmtSub);
+
+$active_tab = $_POST['active_tab'] ?? ($_GET['active_tab'] ?? 'individual');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -41,25 +65,26 @@ include('connect.php');
         <div class="page-content">
             <!-- Tabs Navigation -->
             <div style="display: flex; gap: 0; margin-bottom: 30px; border-bottom: 2px solid var(--border);">
-                <button class="tab-btn active" onclick="switchTab('individual')" style="padding: 15px 25px; background: none; border: none; border-bottom: 3px solid var(--primary); color: var(--primary); font-weight: 600; cursor: pointer; margin-bottom: -2px;">
+                <button class="tab-btn <?php echo $active_tab === 'individual' ? 'active' : ''; ?>" onclick="switchTab('individual')" style="padding: 15px 25px; background: none; border: none; border-bottom: 3px solid <?php echo $active_tab === 'individual' ? 'var(--primary)' : 'transparent'; ?>; color: <?php echo $active_tab === 'individual' ? 'var(--primary)' : 'var(--muted)'; ?>; font-weight: 600; cursor: pointer; margin-bottom: -2px;">
                     <i class="fas fa-user"></i> Individual Report
                 </button>
-                <button class="tab-btn" onclick="switchTab('class')" style="padding: 15px 25px; background: none; border: none; border-bottom: 3px solid transparent; color: var(--muted); font-weight: 600; cursor: pointer; margin-bottom: -2px;">
+                <button class="tab-btn <?php echo $active_tab === 'class' ? 'active' : ''; ?>" onclick="switchTab('class')" style="padding: 15px 25px; background: none; border: none; border-bottom: 3px solid <?php echo $active_tab === 'class' ? 'var(--primary)' : 'transparent'; ?>; color: <?php echo $active_tab === 'class' ? 'var(--primary)' : 'var(--muted)'; ?>; font-weight: 600; cursor: pointer; margin-bottom: -2px;">
                     <i class="fas fa-users"></i> Class Report
                 </button>
-                <button class="tab-btn" onclick="switchTab('daily')" style="padding: 15px 25px; background: none; border: none; border-bottom: 3px solid transparent; color: var(--muted); font-weight: 600; cursor: pointer; margin-bottom: -2px;">
+                <button class="tab-btn <?php echo $active_tab === 'daily' ? 'active' : ''; ?>" onclick="switchTab('daily')" style="padding: 15px 25px; background: none; border: none; border-bottom: 3px solid <?php echo $active_tab === 'daily' ? 'var(--primary)' : 'transparent'; ?>; color: <?php echo $active_tab === 'daily' ? 'var(--primary)' : 'var(--muted)'; ?>; font-weight: 600; cursor: pointer; margin-bottom: -2px;">
                     <i class="fas fa-calendar"></i> Daily Report
                 </button>
             </div>
 
             <!-- Individual Report Tab -->
-            <div id="individual-tab" class="tab-content active">
+            <div id="individual-tab" class="tab-content <?php echo $active_tab === 'individual' ? 'active' : ''; ?>" style="<?php echo $active_tab === 'individual' ? '' : 'display:none;'; ?>">
                 <div class="card">
                     <div class="card-header">
                         <i class="fas fa-search"></i> Search Individual Report
                     </div>
                     <div class="card-body">
                         <form method="post" action="" id="individualForm">
+                            <input type="hidden" name="active_tab" value="individual">
                             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; align-items: flex-end;">
                                 <div class="form-group">
                                     <label for="course">
@@ -67,15 +92,11 @@ include('connect.php');
                                     </label>
                                     <select name="whichcourse" id="course" class="form-control" required>
                                         <option value="">-- Select Course --</option>
-                                        <option value="algo">Analysis of Algorithms</option>
-                                        <option value="algolab">Analysis of Algorithms Lab</option>
-                                        <option value="dbms">Database Management System</option>
-                                        <option value="dbmslab">Database Management System Lab</option>
-                                        <option value="weblab">Web Programming Lab</option>
-                                        <option value="os">Operating System</option>
-                                        <option value="oslab">Operating System Lab</option>
-                                        <option value="obm">Object Based Modeling</option>
-                                        <option value="softcomp">Soft Computing</option>
+                                        <?php foreach($subjects_list as $sub): ?>
+                                            <option value="<?php echo htmlspecialchars($sub['subject_code']); ?>" <?php echo ($_POST['whichcourse'] ?? '') == $sub['subject_code'] ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($sub['subject_name']); ?>
+                                            </option>
+                                        <?php endforeach; ?>
                                     </select>
                                 </div>
                                 <div class="form-group">
@@ -256,7 +277,7 @@ include('connect.php');
             </div>
 
             <!-- Class Report Tab -->
-            <div id="class-tab" class="tab-content" style="display: none;">
+            <div id="class-tab" class="tab-content <?php echo $active_tab === 'class' ? 'active' : ''; ?>" style="<?php echo $active_tab === 'class' ? '' : 'display:none;'; ?>">
                 <div class="card">
                     <div class="card-header">
                         <i class="fas fa-users"></i> Class Attendance Summary
@@ -305,14 +326,58 @@ include('connect.php');
             </div>
 
             <!-- Daily Report Tab -->
-            <div id="daily-tab" class="tab-content" style="display: none;">
+            <div id="daily-tab" class="tab-content <?php echo $active_tab === 'daily' ? 'active' : ''; ?>" style="<?php echo $active_tab === 'daily' ? '' : 'display:none;'; ?>">
                 <div class="card">
                     <div class="card-header">
                         <i class="fas fa-calendar"></i> Daily Attendance Details
                     </div>
                     <div class="card-body">
-                        <p style="color: var(--muted); margin-bottom: 20px;">Select a date to view detailed attendance records</p>
-                        <p><em>Daily reports feature coming soon...</em></p>
+                        <form method="post" action="" style="margin-bottom: 25px;">
+                            <input type="hidden" name="active_tab" value="daily">
+                            <div style="display: flex; gap: 15px; align-items: flex-end;">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label><i class="fas fa-calendar-day"></i> Pick Date</label>
+                                    <input type="date" name="daily_date" class="form-control" value="<?php echo $_POST['daily_date'] ?? date('Y-m-d'); ?>">
+                                </div>
+                                <button type="submit" class="btn btn-info">View Log</button>
+                            </div>
+                        </form>
+
+                        <?php if(isset($_POST['daily_date'])): ?>
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Student ID</th>
+                                    <th>Name</th>
+                                    <th>Course</th>
+                                    <th>Status</th>
+                                    <th>Check-in</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                $daily_date = $_POST['daily_date'];
+                                $query = "SELECT a.stat_id, s.st_name, a.course, a.st_status, a.check_in_time 
+                                          FROM attendance a 
+                                          JOIN students s ON a.stat_id = s.st_id 
+                                          WHERE a.stat_date = ? AND s.st_dept = ?
+                                          ORDER BY a.course ASC, s.st_name ASC";
+                                $stmt = mysqli_prepare($link, $query);
+                                mysqli_stmt_bind_param($stmt, "ss", $daily_date, $tcDept);
+                                mysqli_stmt_execute($stmt);
+                                $resDaily = mysqli_stmt_get_result($stmt);
+                                while($row = mysqli_fetch_assoc($resDaily)): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($row['stat_id']); ?></td>
+                                    <td><?php echo htmlspecialchars($row['st_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($row['course']); ?></td>
+                                    <td><span class="badge badge-<?php echo strtolower($row['st_status']) === 'present' ? 'success' : 'danger'; ?>"><?php echo $row['st_status']; ?></span></td>
+                                    <td><?php echo htmlspecialchars($row['check_in_time'] ?? '-'); ?></td>
+                                </tr>
+                                <?php endwhile; mysqli_stmt_close($stmt); ?>
+                            </tbody>
+                        </table>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

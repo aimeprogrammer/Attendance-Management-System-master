@@ -2,7 +2,7 @@
 ob_start();
 session_start();
 
-if (!isset($_SESSION['name']) || $_SESSION['name'] != 'oasis') {
+if (empty($_SESSION['role']) || $_SESSION['role'] !== 'teacher') {
   header('location: ../index.php');
   exit;
 }
@@ -125,6 +125,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_marks'])) {
       }
 
       $success_msg = "✓ Marks saved successfully for {$successCount} students.";
+
+      // Log the action for audit
+      $log_action = "Updated marks for Exam: $examId, Subject: $subjectId. Total students updated: $successCount";
+      $log_stmt = mysqli_prepare($link, "INSERT INTO system_logs (user_id, action) VALUES (?, ?)");
+      mysqli_stmt_bind_param($log_stmt, "ss", $enteredBy, $log_action);
+      mysqli_stmt_execute($log_stmt);
+      mysqli_stmt_close($log_stmt);
     }
   }
 }

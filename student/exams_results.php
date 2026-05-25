@@ -129,6 +129,16 @@ if ($hasMarksEntries && $selectedExamId !== '') {
   }
 }
 
+// Prepare Chart Data for selected exam breakdown
+$chartLabels = [];
+$chartData = [];
+if (!empty($marksBreakdown)) {
+    foreach ($marksBreakdown as $m) {
+        $chartLabels[] = $m['subject_code'];
+        $chartData[] = (float)$m['total_obtained'];
+    }
+}
+
 // Page layout (uses existing main.css/sidebar styles)
 ?>
 <!DOCTYPE html>
@@ -139,6 +149,7 @@ if ($hasMarksEntries && $selectedExamId !== '') {
   <title>Exam & Results - Student Dashboard</title>
   <link rel="stylesheet" type="text/css" href="../css/main.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <div class="dashboard-container">
@@ -267,6 +278,11 @@ if ($hasMarksEntries && $selectedExamId !== '') {
         <div class="card" style="margin-top: 30px;">
           <div class="card-header"><i class="fas fa-receipt"></i> Marks Breakdown (Exam ID: <?php echo htmlspecialchars($selectedExamId); ?>)</div>
           <div class="card-body">
+            <!-- Performance Chart -->
+            <div style="max-height: 300px; margin-bottom: 30px;">
+                <canvas id="marksChart"></canvas>
+            </div>
+
             <?php if (count($marksBreakdown) === 0): ?>
               <div class="alert alert-info">No marks found for this exam.</div>
             <?php else: ?>
@@ -308,5 +324,30 @@ if ($hasMarksEntries && $selectedExamId !== '') {
     </div>
   </div>
 </div>
+
+<script>
+<?php if (!empty($chartData)): ?>
+new Chart(document.getElementById('marksChart'), {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode($chartLabels); ?>,
+        datasets: [{
+            label: 'Marks Obtained',
+            data: <?php echo json_encode($chartData); ?>,
+            backgroundColor: 'rgba(75, 119, 190, 0.6)',
+            borderColor: '#4b77be',
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: { beginAtZero: true, max: 100 }
+        }
+    }
+});
+<?php endif; ?>
+</script>
 </body>
 </html>
